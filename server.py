@@ -11,10 +11,14 @@ STT_KEY = E("STT_KEY", "")
 STT_MODEL = E("STT_MODEL", "whisper-large-v3-turbo")
 STT_LANG = E("STT_LANG", "ru")
 
+# агент считается "в сети", если он выходил на связь не позже этого числа секунд назад
+AGENT_ALIVE = 120
+
 LOCK, RUN = threading.Lock(), threading.Lock()
 MSGS, IMGS = [], {}
 JOBS, WAIT = queue.Queue(), {}
 agent_seen, nid = 0.0, 0
+
 
 def add(role, text="", img=None):
     global nid
@@ -29,7 +33,8 @@ def add(role, text="", img=None):
                 IMGS.pop(next(iter(IMGS)))
         MSGS.append(m)
         del MSGS[:-200]
-    return m
+        return m
+
 
 def guard(f):
     @wraps(f)
@@ -40,8 +45,9 @@ def guard(f):
         return f(*a, **k)
     return w
 
+
 def call_agent(name, args, timeout=900):
-    if time.time() - agent_seen > 60:
+    if time.time() - agent_seen > AGENT_ALIVE:
         return {"text": "ПК-агент не в сети. Запусти agent.py на компьютере."}
     jid = uuid.uuid4().hex
     slot = {"ev": threading.Event(), "res": None}
@@ -50,6 +56,7 @@ def call_agent(name, args, timeout=900):
     ok = slot["ev"].wait(timeout)
     WAIT.pop(jid, None)
     return slot["res"] if ok else {"text": "Таймаут: ПК не ответил."}
+
 
 def process(text, out):
     with RUN:
@@ -61,6 +68,7 @@ def process(text, out):
         add("assistant", reply)
         out["reply"] = reply
 
+
 def start(text):
     out = {}
     t = threading.Thread(target=process, args=(text, out), daemon=True)
@@ -70,12 +78,14 @@ def start(text):
         return jsonify(text=text, reply=out.get("reply", "Работаю — результат смотри на сайте."))
     return jsonify(text=text)
 
+
 @app.post("/api/text")
 def api_text():
     text = ((request.get_json(silent=True) or {}).get("text") or "").strip()
     if not text:
         return jsonify(error="Пустой запрос"), 400
     return start(text)
+
 
 @app.post("/api/voice")
 def api_voice():
@@ -94,16 +104,19 @@ def api_voice():
         return jsonify(error="Ничего не слышно"), 422
     return start(text)
 
+
 @app.get("/api/messages")
 def api_messages():
     a = int(request.args.get("after", 0))
     return jsonify(messages=[m for m in MSGS if m["id"] > a], busy=RUN.locked(),
-                   agent=time.time() - agent_seen < 60 or RUN.locked())
+                   agent=time.time() - agent_seen < AGENT_ALIVE or RUN.locked())
+
 
 @app.get("/img/<iid>")
 def img(iid):
     d = IMGS.get(iid)
     return Response(d, mimetype="image/png") if d else ("", 404)
+
 
 @app.get("/agent/poll")
 @guard
@@ -118,9 +131,12 @@ def agent_poll():
             pass
     return jsonify(None)
 
+
 @app.post("/agent/result")
 @guard
 def agent_result():
+    global agent_seen
+    agent_seen = time.time()  # агент только что вернулся с задачи — он точно жив
     d = request.get_json(silent=True) or {}
     s = WAIT.get(d.get("id"))
     if s:
@@ -128,13 +144,16 @@ def agent_result():
         s["ev"].set()
     return jsonify(ok=True)
 
+
 @app.get("/")
 def index():
     return send_from_directory("static", "index.html")
 
+
 @app.get("/health")
 def health():
     return "ok"
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(E("PORT", 8000)), threaded=True)
