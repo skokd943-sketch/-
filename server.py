@@ -39,8 +39,10 @@ def add(role, text="", img=None):
 def guard(f):
     @wraps(f)
     def w(*a, **k):
+        if not TOKEN:  # токен не задан - защита отключена
+            return f(*a, **k)
         t = request.headers.get("Authorization", "").replace("Bearer ", "").strip() or request.args.get("t", "")
-        if not TOKEN or not hmac.compare_digest(t, TOKEN):
+        if not hmac.compare_digest(t, TOKEN):
             return jsonify(error="Unauthorized"), 401
         return f(*a, **k)
     return w
