@@ -18,6 +18,9 @@ LOCK, RUN = threading.Lock(), threading.Lock()
 MSGS, IMGS = [], {}
 JOBS, WAIT = queue.Queue(), {}
 agent_seen, nid = 0.0, 0
+active_job = None  # id задачи, которую агент взял и ещё не вернул
+CANCELLED = set()  # id задач, которые пользователь отменил
+SHOTS = queue.Queue()  # id запросов на мгновенный скриншот
 
 
 def add(role, text="", img=None):
@@ -123,12 +126,27 @@ def img(iid):
 @app.get("/agent/poll")
 @guard
 def agent_poll():
-    global agent_seen
+    global agent_seen, active_job
+    if active_job:
+        # агент опрашивает сервер, значит он свободен: прошлая задача оборвана (агент закрыли/перезапустили)
+        s = WAIT.get(active_job)
+        if s:
+            s["res"] = {"text": "Агент был перезапущен, задача отменена. Отправь запрос ещё раз."}
+            s["ev"].set()
+        active_job = None
+    CANCELLED.clear()
     end = time.time() + 25
     while time.time() < end:
         agent_seen = time.time()
         try:
-            return jsonify(JOBS.get(timeout=2))
+            sid = SHOTS.get_nowait()  # мгновенный скриншот имеет приоритет
+            return jsonify({"id": sid, "name": "screenshot", "args": {}})
+        except queue.Empty:
+            pass
+        try:
+            job = JOBS.get(timeout=2)
+            active_job = job["id"]
+            return jsonify(job)
         except queue.Empty:
             pass
     return jsonify(None)
@@ -137,14 +155,76 @@ def agent_poll():
 @app.post("/agent/result")
 @guard
 def agent_result():
-    global agent_seen
+    global agent_seen, active_job
     agent_seen = time.time()  # агент только что вернулся с задачи — он точно жив
     d = request.get_json(silent=True) or {}
+    if d.get("id") == active_job:
+        active_job = None
     s = WAIT.get(d.get("id"))
     if s:
         s["res"] = {"text": d.get("text", ""), "image": d.get("image")}
         s["ev"].set()
     return jsonify(ok=True)
+
+
+@app.post("/api/cancel")
+@guard
+def api_cancel():
+    """Отменить текущий запрос (и всё, что ещё не взято агентом)."""
+    n = 0
+    while True:  # задачи, которые агент ещё не забрал
+        try:
+            j = JOBS.get_nowait()
+        except queue.Empty:
+            break
+        s = WAIT.get(j["id"])
+        if s:
+            s["res"] = {"text": "Отменено."}
+            s["ev"].set()
+        n += 1
+    jid = active_job  # задача, которую агент сейчас выполняет
+    if jid:
+        CANCELLED.add(jid)
+        s = WAIT.get(jid)
+        if s:
+            s["res"] = {"text": "Отменено."}
+            s["ev"].set()
+        n += 1
+    return jsonify(ok=True, cancelled=n)
+
+
+@app.post("/api/screenshot")
+@guard
+def api_screenshot():
+    """Мгновенный скриншот экрана ПК, даже пока модель думает."""
+    if time.time() - agent_seen > AGENT_ALIVE:
+        return jsonify(error="ПК-агент не в сети"), 503
+    jid = uuid.uuid4().hex
+    slot = {"ev": threading.Event(), "res": None}
+    WAIT[jid] = slot
+    SHOTS.put(jid)
+    ok = slot["ev"].wait(40)
+    WAIT.pop(jid, None)
+    res = slot["res"] if ok else None
+    if not res or not res.get("image"):
+        return jsonify(error=(res or {}).get("text") or "Скриншот не получился"), 502
+    add("assistant", "", base64.b64decode(res["image"]))
+    return jsonify(ok=True)
+
+
+@app.get("/agent/state")
+@guard
+def agent_state():
+    """Агент спрашивает во время работы: не отменили ли задачу, не просили ли скриншот."""
+    global agent_seen
+    agent_seen = time.time()  # заодно это «пульс»: агент жив, пока думает
+    shots = []
+    while True:
+        try:
+            shots.append(SHOTS.get_nowait())
+        except queue.Empty:
+            break
+    return jsonify(cancel=request.args.get("id", "") in CANCELLED, shots=shots)
 
 
 @app.get("/")

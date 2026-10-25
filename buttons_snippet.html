@@ -1,0 +1,32 @@
+<!-- Вставь этот блок в static/index.html прямо перед </body> -->
+<script>
+(function () {
+  var TOKEN = ""; // если вернёшь APP_TOKEN — впиши его сюда
+  var box = document.createElement("div");
+  box.style.cssText = "position:fixed;top:0;right:0;z-index:99999;display:flex;gap:8px;" +
+    "padding:calc(env(safe-area-inset-top,0px) + 8px) 10px 0 0";
+
+  function mk(label, color, path, done) {
+    var b = document.createElement("button");
+    b.textContent = label;
+    b.style.cssText = "padding:10px 14px;border:0;border-radius:12px;font-size:15px;font-weight:600;" +
+      "color:#fff;background:" + color + ";box-shadow:0 2px 8px rgba(0,0,0,.35)";
+    b.onclick = function () {
+      var old = b.textContent;
+      b.disabled = true;
+      b.textContent = "…";
+      var h = TOKEN ? { Authorization: "Bearer " + TOKEN } : {};
+      fetch(path, { method: "POST", headers: h })
+        .then(function (r) { return r.json().catch(function () { return {}; }); })
+        .then(function (d) { if (d && d.error) alert(d.error); })
+        .catch(function () { alert("Нет связи с сервером"); })
+        .then(function () { b.disabled = false; b.textContent = old; });
+    };
+    return b;
+  }
+
+  box.appendChild(mk("⛔ Отмена", "#d33", "/api/cancel"));
+  box.appendChild(mk("📷 Скриншот", "#2a7", "/api/screenshot"));
+  document.body.appendChild(box);
+})();
+</script>
