@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#1c1f26">
+<title>Пульт</title>
+<style>
+:root{--bg:#1c1f26;--card:#272b35;--ink:#eceff4;--mute:#8d95a6;--acc:#ff6a4d;--ok:#6fd3a0}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif}
+body{display:flex;flex-direction:column;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+header{display:flex;align-items:center;gap:8px;padding:12px 16px;color:var(--mute);font-size:14px}
+#dot{width:9px;height:9px;border-radius:50%;background:var(--mute)}
+#dot.on{background:var(--ok)}
+#log{flex:1;overflow-y:auto;padding:8px 16px;display:flex;flex-direction:column;gap:8px}
+.m{max-width:85%;padding:10px 13px;border-radius:16px;background:var(--card);white-space:pre-wrap;word-break:break-word}
+.m.user{align-self:flex-end;background:#3a4256}
+.m img{display:block;max-width:100%;border-radius:10px}
+.empty{margin:auto;color:var(--mute);text-align:center}
+#dock{padding:10px 16px 16px;display:flex;flex-direction:column;align-items:center;gap:12px}
+#btn{width:112px;height:112px;border-radius:50%;border:0;background:var(--ink);color:var(--bg);font-size:15px;font-weight:600;
+ box-shadow:0 0 0 8px #ffffff14;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;
+ transition:transform .12s,background .12s,box-shadow .12s}
+#btn.rec{background:var(--acc);color:#fff;transform:scale(1.1);box-shadow:0 0 0 14px #ff6a4d33}
+#btn:focus-visible{outline:3px solid var(--ok);outline-offset:4px}
+#row{display:flex;gap:8px;width:100%;max-width:560px}
+#txt{flex:1;min-width:0;padding:12px 14px;border-radius:12px;border:1px solid #3a4256;background:var(--card);color:var(--ink);font:inherit}
+#send{padding:0 16px;border-radius:12px;border:0;background:var(--card);color:var(--ink);font:inherit}
+@media (prefers-reduced-motion:reduce){#btn{transition:none}}
+</style>
+</head>
+<body>
+<header><span id="dot"></span><span id="st">Подключаюсь…</span></header>
+<div id="log"><div class="empty" id="empty">Зажми круглую кнопку и говори.<br>Отпустишь — запрос уйдёт.</div></div>
+<div id="dock">
+  <button id="btn" oncontextmenu="return false">Держи</button>
+  <div id="row"><input id="txt" placeholder="Или напиши запрос" enterkeyhint="send"><button id="send">Отправить</button></div>
+</div>
+<script>
+const $=s=>document.querySelector(s);
+let token="",bad=false,timer;
+try{token=localStorage.getItem("t")||""}catch(e){}
+if(location.hash.length>1){try{token=decodeURIComponent(location.hash.slice(1)).replace(/^t=/,"").trim()}catch(e){}
+  try{localStorage.setItem("t",token)}catch(e){}history.replaceState(null,"",location.pathname)}
+function askToken(){const v=(prompt("Код доступа")||"").trim();
+  if(v){token=v;bad=false;try{localStorage.setItem("t",v)}catch(e){}poll()}}
+const api=(p,o={})=>fetch(p,{...o,headers:{...(o.headers||{}),Authorization:"Bearer "+token}}).then(r=>{
+  if(r.status===401){bad=true;render()}return r});
+let last=0,busy=false,agent=false,note="";
+function render(){$("#dot").className=agent&&!bad?"on":"";
+  $("#st").textContent=(bad||!token)?"Нужен код — нажми сюда":(note||(busy?"Работаю…":(agent?"ПК в сети":"ПК не в сети — запусти agent.py")))}
+$("#st").onclick=()=>{if(bad||!token)askToken()};
+function addMsg(m){$("#empty")?.remove();const d=document.createElement("div");d.className="m "+m.role;
+  if(m.img){const i=new Image();i.src="/img/"+m.img+"?t="+encodeURIComponent(token);i.onclick=()=>open(i.src);d.append(i)}
+  if(m.text)d.append(m.text);const l=$("#log");l.append(d);l.scrollTop=l.scrollHeight}
+async function poll(){clearTimeout(timer);if(!token||bad)return render();try{const d=await(await api("/api/messages?after="+last)).json();
+  d.messages.forEach(m=>{last=m.id;addMsg(m)});busy=d.busy;agent=d.agent;render()}catch(e){}
+  timer=setTimeout(poll,busy?700:2000)}
+function flash(t){note=t;render();setTimeout(()=>{note="";render()},3000)}
+async function sendText(t){t=t.trim();if(!t)return;
+  const r=await api("/api/text",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({text:t})});
+  if(!r.ok)flash((await r.json()).error||"Ошибка")}
+$("#send").onclick=()=>{sendText($("#txt").value);$("#txt").value=""};
+$("#txt").onkeydown=e=>{if(e.key==="Enter"){$("#send").click()}};
+
+let stream,rec,chunks=[],holding=false,t0=0;
+const mime=MediaRecorder.isTypeSupported("audio/webm;codecs=opus")?"audio/webm;codecs=opus":"audio/mp4";
+const ext=mime.startsWith("audio/webm")?"webm":"m4a";
+async function down(e){e.preventDefault();holding=true;$("#btn").setPointerCapture(e.pointerId);
+  try{if(!stream)stream=await navigator.mediaDevices.getUserMedia({audio:true})}
+  catch(x){holding=false;return flash("Нет доступа к микрофону")}
+  if(!holding)return;chunks=[];rec=new MediaRecorder(stream,{mimeType:mime});
+  rec.ondataavailable=ev=>ev.data.size&&chunks.push(ev.data);
+  rec.onstop=async()=>{const b=new Blob(chunks,{type:mime});
+    if(Date.now()-t0<400||b.size<1500)return flash("Слишком коротко");
+    const fd=new FormData();fd.append("audio",b,"voice."+ext);
+    const r=await api("/api/voice",{method:"POST",body:fd});
+    if(!r.ok)flash((await r.json()).error||"Ошибка")};
+  t0=Date.now();rec.start();$("#btn").classList.add("rec");$("#btn").textContent="Говори…"}
+function up(){holding=false;$("#btn").classList.remove("rec");$("#btn").textContent="Держи";
+  if(rec&&rec.state==="recording")rec.stop()}
+const b=$("#btn");b.addEventListener("pointerdown",down);
+["pointerup","pointercancel","lostpointercapture"].forEach(n=>b.addEventListener(n,up));
+render();if(!token)askToken();else poll();
+</script>
+</body>
+</html>
