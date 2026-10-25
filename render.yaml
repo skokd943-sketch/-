@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: voice-remote
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn server:app --bind 0.0.0.0:$PORT --workers 1 --threads 8 --timeout 180
+    envVars:
+      - key: APP_TOKEN        # твой пароль доступа (придумай длинный)
+        sync: false
+      - key: STT_KEY          # ключ Groq (распознавание голоса)
+        sync: false
