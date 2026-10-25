@@ -71,7 +71,6 @@ def start(text):
     return jsonify(text=text)
 
 @app.post("/api/text")
-@guard
 def api_text():
     text = ((request.get_json(silent=True) or {}).get("text") or "").strip()
     if not text:
@@ -79,7 +78,6 @@ def api_text():
     return start(text)
 
 @app.post("/api/voice")
-@guard
 def api_voice():
     f = request.files.get("audio") or request.files.get("file")
     if not f:
@@ -97,14 +95,12 @@ def api_voice():
     return start(text)
 
 @app.get("/api/messages")
-@guard
 def api_messages():
     a = int(request.args.get("after", 0))
     return jsonify(messages=[m for m in MSGS if m["id"] > a], busy=RUN.locked(),
                    agent=time.time() - agent_seen < 60 or RUN.locked())
 
 @app.get("/img/<iid>")
-@guard
 def img(iid):
     d = IMGS.get(iid)
     return Response(d, mimetype="image/png") if d else ("", 404)

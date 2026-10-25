@@ -40,22 +40,15 @@ header{display:flex;align-items:center;gap:8px;padding:12px 16px;color:var(--mut
 </div>
 <script>
 const $=s=>document.querySelector(s);
-let token="",bad=false,timer;
-try{token=localStorage.getItem("t")||""}catch(e){}
-if(location.hash.length>1){try{token=decodeURIComponent(location.hash.slice(1)).replace(/^t=/,"").trim()}catch(e){}
-  try{localStorage.setItem("t",token)}catch(e){}history.replaceState(null,"",location.pathname)}
-function askToken(){const v=(prompt("Код доступа")||"").trim();
-  if(v){token=v;bad=false;try{localStorage.setItem("t",v)}catch(e){}poll()}}
-const api=(p,o={})=>fetch(p,{...o,headers:{...(o.headers||{}),Authorization:"Bearer "+token}}).then(r=>{
-  if(r.status===401){bad=true;render()}return r});
+let timer;
+const api=(p,o={})=>fetch(p,o);
 let last=0,busy=false,agent=false,note="";
-function render(){$("#dot").className=agent&&!bad?"on":"";
-  $("#st").textContent=(bad||!token)?"Нужен код — нажми сюда":(note||(busy?"Работаю…":(agent?"ПК в сети":"ПК не в сети — запусти agent.py")))}
-$("#st").onclick=()=>{if(bad||!token)askToken()};
+function render(){$("#dot").className=agent?"on":"";
+  $("#st").textContent=(note||(busy?"Работаю…":(agent?"ПК в сети":"ПК не в сети — запусти agent.py")))}
 function addMsg(m){$("#empty")?.remove();const d=document.createElement("div");d.className="m "+m.role;
-  if(m.img){const i=new Image();i.src="/img/"+m.img+"?t="+encodeURIComponent(token);i.onclick=()=>open(i.src);d.append(i)}
+  if(m.img){const i=new Image();i.src="/img/"+m.img;i.onclick=()=>open(i.src);d.append(i)}
   if(m.text)d.append(m.text);const l=$("#log");l.append(d);l.scrollTop=l.scrollHeight}
-async function poll(){clearTimeout(timer);if(!token||bad)return render();try{const d=await(await api("/api/messages?after="+last)).json();
+async function poll(){clearTimeout(timer);try{const d=await(await api("/api/messages?after="+last)).json();
   d.messages.forEach(m=>{last=m.id;addMsg(m)});busy=d.busy;agent=d.agent;render()}catch(e){}
   timer=setTimeout(poll,busy?700:2000)}
 function flash(t){note=t;render();setTimeout(()=>{note="";render()},3000)}
@@ -83,7 +76,7 @@ function up(){holding=false;$("#btn").classList.remove("rec");$("#btn").textCont
   if(rec&&rec.state==="recording")rec.stop()}
 const b=$("#btn");b.addEventListener("pointerdown",down);
 ["pointerup","pointercancel","lostpointercapture"].forEach(n=>b.addEventListener(n,up));
-render();if(!token)askToken();else poll();
+render();poll();
 </script>
 </body>
 </html>
